@@ -52,13 +52,34 @@
             <div class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
             <h1 class="text-xl font-bold text-white">مركز مراقبة المحولات الكهربائية</h1>
         </div>
-        <div class="flex items-center gap-4 text-sm text-slate-400">
+        <div class="flex items-center gap-3 text-sm text-slate-400">
             <span id="sync-status">جاري المزامنة...</span>
+            <button id="mute-btn" onclick="toggleMute()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+                🔊 الصوت مفعّل
+            </button>
             <button onclick="fetchDashboardData()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg transition">
                 تحديث الآن
             </button>
         </div>
     </header>
+
+    <!-- شريط الطوارئ العلوي (يظهر تلقائياً عند وجود عطل) -->
+    <div id="emergency-banner" class="hidden bg-red-600 text-white px-6 py-3 shadow-lg border-b border-red-400">
+        <div class="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <span class="text-xl animate-bounce">🚨</span>
+                <p id="emergency-text" class="font-bold text-sm sm:text-base"></p>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="emergency-locate-btn" class="bg-white text-red-700 hover:bg-red-50 font-bold text-xs px-3 py-1.5 rounded-lg transition">
+                    📍 عرض على الخريطة
+                </button>
+                <button onclick="toggleMute()" class="bg-red-800 hover:bg-red-900 text-white text-xs px-3 py-1.5 rounded-lg border border-red-400/50 transition">
+                    🔇 كتم الإنذار
+                </button>
+            </div>
+        </div>
+    </div>
 
     <main class="p-6 max-w-[1600px] mx-auto space-y-6">
 
@@ -166,7 +187,7 @@
         </section>
     </main>
 
-    <!-- نافذة تعيين اسم وموقع المحولة (Zero-Touch Provisioning) -->
+    <!-- نافذة تعيين اسم وموقع المحولة -->
     <div id="assign-modal" class="fixed inset-0 bg-black/75 hidden items-center justify-center z-50 p-4">
         <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl p-6 space-y-4">
             <div class="flex justify-between items-center">
@@ -193,7 +214,6 @@
 
                 <div>
                     <label class="block text-sm text-slate-300 mb-1">ابحث عن موقع أو انقر على الخريطة لتحديد مكان المحولة</label>
-                    <!-- شريط البحث داخل نافذة تعديل موقع المحولة -->
                     <div class="flex gap-2 mb-2">
                         <input type="text" id="modal-map-search"
                                onkeydown="if(event.key === 'Enter') { event.preventDefault(); searchLocation('modal'); }"
@@ -242,10 +262,141 @@
     </div>
 
     <script>
-        let currentLat = 36.2021; // موقع احتياطي في حال رفض إذن الموقع
+        let currentLat = 36.2021;
         let currentLng = 37.1343;
         let userLocationMarker = null;
         const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
+        // ====== نظام الإنذار الصوتي (Web Audio API) والطوارئ ======
+        let audioCtx = null;
+        let alarmSoundInterval = null;
+        let isMuted = false;
+        let knownAlarmIds = new Set();
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        // تفعيل الصوت تلقائياً عند أول نقرة للمستخدم في الصفحة
+        document.addEventListener('click', initAudio, { once: true });
+
+        function playBeepTone() {
+            if (isMuted) return;
+            initAudio();
+            if (!audioCtx || audioCtx.state !== 'running') return;
+
+            const now = audioCtx.currentTime;
+            // نغمتان متتاليتان واضحتان (880Hz ثم 660Hz)
+            [880, 660].forEach((freq, idx) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(freq, now + idx * 0.22);
+
+                gain.gain.setValueAtTime(0.18, now + idx * 0.22);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.22 + 0.2);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(now + idx * 0.22);
+                osc.stop(now + idx * 0.22 + 0.21);
+            });
+        }
+
+        function startAlarmSound() {
+            if (isMuted || alarmSoundInterval) return;
+            playBeepTone();
+            alarmSoundInterval = setInterval(playBeepTone, 1600);
+        }
+
+        function stopAlarmSound() {
+            if (alarmSoundInterval) {
+                clearInterval(alarmSoundInterval);
+                alarmSoundInterval = null;
+            }
+        }
+
+        function updateMuteButtonUI() {
+            const btn = document.getElementById('mute-btn');
+            if (isMuted) {
+                btn.innerHTML = '🔇 الصوت مكتوم';
+                btn.className = 'bg-amber-600/30 border border-amber-500/50 text-amber-300 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5';
+            } else {
+                btn.innerHTML = '🔊 الصوت مفعّل';
+                btn.className = 'bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5';
+            }
+        }
+
+        function toggleMute() {
+            initAudio();
+            isMuted = !isMuted;
+            updateMuteButtonUI();
+            if (isMuted) {
+                stopAlarmSound();
+            } else if (latestData && latestData.active_alarms.length > 0) {
+                startAlarmSound();
+            }
+        }
+
+        function handleEmergencyState(activeAlarms) {
+            const banner = document.getElementById('emergency-banner');
+            const bannerText = document.getElementById('emergency-text');
+            const locateBtn = document.getElementById('emergency-locate-btn');
+
+            if (!activeAlarms || activeAlarms.length === 0) {
+                banner.classList.add('hidden');
+                stopAlarmSound();
+                knownAlarmIds.clear();
+                // إعادة تفعيل الصوت تلقائياً استعداداً لأي عطل مستقبلي
+                if (isMuted) {
+                    isMuted = false;
+                    updateMuteButtonUI();
+                }
+                return;
+            }
+
+            // يوجد عطل نشط: إظهار الشريط العلوي وتشغيل الصوت
+            const primary = activeAlarms[0];
+            const name = primary.name ?? primary.mac_address;
+            const area = primary.neighborhood ? ` (${primary.neighborhood})` : '';
+            const extraCount = activeAlarms.length > 1 ? ` — بالإضافة إلى ${activeAlarms.length - 1} محولة أخرى` : '';
+
+            bannerText.textContent = `تنبيه طارئ: ارتفاع حرارة "${name}"${area} إلى ${primary.last_temp}°C وتم فصل التغذية!${extraCount}`;
+            banner.classList.remove('hidden');
+
+            if (primary.latitude && primary.longitude) {
+                locateBtn.classList.remove('hidden');
+                locateBtn.onclick = () => focusOnMap(primary.id, primary.latitude, primary.longitude);
+            } else {
+                locateBtn.classList.add('hidden');
+            }
+
+            if (!isMuted) {
+                startAlarmSound();
+            }
+
+            // فحص إذا ظهر عطل جديد لم يكن موجوداً في الدورة السابقة -> توجيه الخريطة تلقائياً
+            const currentIds = new Set(activeAlarms.map(a => a.id));
+            const newAlarm = activeAlarms.find(a => !knownAlarmIds.has(a.id));
+
+            if (newAlarm) {
+                switchTab('alarms');
+                if (newAlarm.latitude && newAlarm.longitude) {
+                    // تأخير بسيط لضمان رسم الدبوس على الخريطة أولاً ثم فتح البطاقة
+                    setTimeout(() => {
+                        focusOnMap(newAlarm.id, newAlarm.latitude, newAlarm.longitude);
+                    }, 200);
+                }
+            }
+
+            knownAlarmIds = currentIds;
+        }
+        // ============================================================
 
         // تهيئة الخريطة الرئيسية
         const mainMap = L.map('main-map').setView([currentLat, currentLng], 13);
@@ -254,7 +405,6 @@
             attribution: '&copy; OpenStreetMap'
         }).addTo(mainMap);
 
-        // دالة جلب الموقع الحالي وتوجيه الخريطة إليه
         function centerOnUserLocation() {
             if (!navigator.geolocation) return;
 
@@ -263,10 +413,8 @@
                     currentLat = position.coords.latitude;
                     currentLng = position.coords.longitude;
 
-                    // تحريك الخريطة فوراً لموقعك
                     mainMap.setView([currentLat, currentLng], 15);
 
-                    // وضع نقطة زرقاء توضّح موقعك الحالي
                     if (userLocationMarker) {
                         userLocationMarker.setLatLng([currentLat, currentLng]);
                     } else {
@@ -286,7 +434,6 @@
             );
         }
 
-        // استدعاء الدالة فور فتح الصفحة
         centerOnUserLocation();
 
         const markers = {};
@@ -653,6 +800,7 @@
                 latestData = data;
                 updateMap(data.assigned);
                 renderPanels(data);
+                handleEmergencyState(data.active_alarms);
                 document.getElementById('sync-status').textContent = `آخر تحديث: ${new Date().toLocaleTimeString('ar-SY')}`;
             } catch (err) {
                 document.getElementById('sync-status').textContent = 'تعذر الاتصال بالسيرفر';
