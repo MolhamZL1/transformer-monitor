@@ -9,14 +9,8 @@ use Illuminate\Http\Request;
 
 class TelemetryController extends Controller
 {
-    public function store(Request $request): JsonResponse
+   public function store(Request $request): JsonResponse
     {
-        // حماية بسيطة لمنع الطلبات العشوائية
-        $expectedKey = env('GATEWAY_API_KEY', 'my_secret_esp_key_2026');
-        if ($request->header('X-API-KEY') !== $expectedKey) {
-            return response()->json(['error' => 'Unauthorized'], 401);
-        }
-
         $data = $request->validate([
             'mac_address'  => 'required|string|max:20',
             'msg_id'       => 'nullable|integer',
@@ -32,7 +26,6 @@ class TelemetryController extends Controller
             ['is_assigned' => false]
         );
 
-        // تجاهل الرسالة إذا كانت مكررة من تمرير الشبكة (Relay/Mesh)
         if (isset($data['msg_id']) && $transformer->last_msg_id === (int) $data['msg_id']) {
             return response()->json(['status' => 'duplicate_ignored']);
         }
