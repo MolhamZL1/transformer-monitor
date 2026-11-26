@@ -87,21 +87,37 @@
 
             <!-- الخريطة التفاعلية -->
             <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col">
-                <div class="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-                    <h2 class="font-semibold">خريطة الأحياء والمحولات</h2><button onclick="centerOnUserLocation()" class="bg-sky-600 hover:bg-sky-500 text-white text-xs px-3 py-1 rounded-lg transition">
-    📍 موقعي
-</button>
+                <div class="px-4 py-3 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex items-center gap-3">
+                        <h2 class="font-semibold">خريطة الأحياء والمحولات</h2>
+                        <button onclick="centerOnUserLocation()" class="bg-sky-600 hover:bg-sky-500 text-white text-xs px-3 py-1 rounded-lg transition">
+                            📍 موقعي
+                        </button>
+                    </div>
                     <div class="flex items-center gap-4 text-xs text-slate-400">
                         <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> سليم</span>
                         <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-red-500"></span> إنذار / فصل</span>
                         <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span> منقطع</span>
                     </div>
                 </div>
+
+                <!-- شريط البحث في الخريطة الرئيسية -->
+                <div class="flex gap-2 p-3 border-b border-slate-800 bg-slate-900/60">
+                    <input type="text" id="main-map-search"
+                           onkeydown="if(event.key === 'Enter') searchLocation('main')"
+                           placeholder="ابحث عن حي أو مدينة (مثال: دمشق المزة)..."
+                           class="flex-1 bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-sky-500">
+                    <button type="button" onclick="searchLocation('main')"
+                            class="bg-sky-600 hover:bg-sky-500 text-white text-sm px-4 py-2 rounded-lg transition">
+                        🔍 بحث
+                    </button>
+                </div>
+
                 <div id="main-map" class="w-full h-[520px] z-0"></div>
             </div>
 
             <!-- اللوحة الجانبية (الأعطال + الأجهزة الجديدة + القائمة) -->
-            <div class="bg-slate-900 border border-slate-800 rounded-xl flex flex-col h-[568px]">
+            <div class="bg-slate-900 border border-slate-800 rounded-xl flex flex-col h-[626px]">
                 <div class="flex border-b border-slate-800 text-sm">
                     <button onclick="switchTab('alarms')" id="tab-btn-alarms"
                         class="flex-1 py-3 font-medium border-b-2 border-red-500 text-white">
@@ -176,7 +192,18 @@
                 </div>
 
                 <div>
-                    <label class="block text-sm text-slate-300 mb-1">انقر على الخريطة لتحديد موقع المحولة</label>
+                    <label class="block text-sm text-slate-300 mb-1">ابحث عن موقع أو انقر على الخريطة لتحديد مكان المحولة</label>
+                    <!-- شريط البحث داخل نافذة تعديل موقع المحولة -->
+                    <div class="flex gap-2 mb-2">
+                        <input type="text" id="modal-map-search"
+                               onkeydown="if(event.key === 'Enter') { event.preventDefault(); searchLocation('modal'); }"
+                               placeholder="ابحث لنقل دبوس المحولة إلى الموقع..."
+                               class="flex-1 bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-sky-500">
+                        <button type="button" onclick="searchLocation('modal')"
+                                class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-4 py-2 rounded-lg transition">
+                            🔍 نقل الدبوس
+                        </button>
+                    </div>
                     <div id="picker-map" class="w-full h-56 rounded-lg border border-slate-700"></div>
                 </div>
 
@@ -215,7 +242,7 @@
     </div>
 
     <script>
-      let currentLat = 36.2021; // موقع احتياطي في حال رفض إذن الموقع
+        let currentLat = 36.2021; // موقع احتياطي في حال رفض إذن الموقع
         let currentLng = 37.1343;
         let userLocationMarker = null;
         const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
@@ -261,6 +288,7 @@
 
         // استدعاء الدالة فور فتح الصفحة
         centerOnUserLocation();
+
         const markers = {};
         let pickerMap = null;
         let pickerMarker = null;
@@ -324,7 +352,6 @@
         }
 
         function renderPanels(data) {
-            // الإحصائيات
             document.getElementById('stat-total').textContent = data.stats.total;
             document.getElementById('stat-alarms').textContent = data.stats.alarms;
             document.getElementById('stat-unassigned').textContent = data.stats.unassigned;
@@ -460,6 +487,7 @@
             document.getElementById('assign-mac').textContent = `MAC: ${t.mac_address}`;
             document.getElementById('assign-name').value = t.name ?? '';
             document.getElementById('assign-neighborhood').value = t.neighborhood ?? '';
+            document.getElementById('modal-map-search').value = '';
 
             const lat = t.latitude ?? currentLat;
             const lng = t.longitude ?? currentLng;
@@ -580,6 +608,42 @@
                 headers: { 'X-CSRF-TOKEN': csrfToken, 'Accept': 'application/json' }
             });
             fetchDashboardData();
+        }
+
+        async function searchLocation(target) {
+            const inputId = target === 'main' ? 'main-map-search' : 'modal-map-search';
+            const query = document.getElementById(inputId).value.trim();
+            if (!query) return;
+
+            try {
+                const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`;
+                const response = await fetch(url, {
+                    headers: { 'Accept-Language': 'ar,en' }
+                });
+                const results = await response.json();
+
+                if (!results || results.length === 0) {
+                    alert('لم يتم العثور على الموقع، جرّب كتابة اسم المدينة والحي بشكل أوضح.');
+                    return;
+                }
+
+                const lat = parseFloat(results[0].lat);
+                const lng = parseFloat(results[0].lon);
+
+                if (target === 'main') {
+                    mainMap.flyTo([lat, lng], 15);
+                } else if (pickerMap) {
+                    pickerMap.flyTo([lat, lng], 16);
+                    if (pickerMarker) {
+                        pickerMarker.setLatLng([lat, lng]);
+                    }
+                    document.getElementById('assign-lat').value = lat.toFixed(6);
+                    document.getElementById('assign-lng').value = lng.toFixed(6);
+                }
+            } catch (error) {
+                console.error('خطأ في البحث:', error);
+                alert('تعذر الاتصال بخدمة الخرائط حالياً.');
+            }
         }
 
         async function fetchDashboardData() {
