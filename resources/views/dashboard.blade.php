@@ -88,7 +88,9 @@
             <!-- الخريطة التفاعلية -->
             <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col">
                 <div class="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-                    <h2 class="font-semibold">خريطة الأحياء والمحولات</h2>
+                    <h2 class="font-semibold">خريطة الأحياء والمحولات</h2><button onclick="centerOnUserLocation()" class="bg-sky-600 hover:bg-sky-500 text-white text-xs px-3 py-1 rounded-lg transition">
+    📍 موقعي
+</button>
                     <div class="flex items-center gap-4 text-xs text-slate-400">
                         <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> سليم</span>
                         <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-red-500"></span> إنذار / فصل</span>
@@ -213,17 +215,52 @@
     </div>
 
     <script>
-        const DEFAULT_LAT = 36.2021;
-        const DEFAULT_LNG = 37.1343;
+      let currentLat = 36.2021; // موقع احتياطي في حال رفض إذن الموقع
+        let currentLng = 37.1343;
+        let userLocationMarker = null;
         const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 
         // تهيئة الخريطة الرئيسية
-        const mainMap = L.map('main-map').setView([DEFAULT_LAT, DEFAULT_LNG], 13);
+        const mainMap = L.map('main-map').setView([currentLat, currentLng], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; OpenStreetMap'
         }).addTo(mainMap);
 
+        // دالة جلب الموقع الحالي وتوجيه الخريطة إليه
+        function centerOnUserLocation() {
+            if (!navigator.geolocation) return;
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    currentLat = position.coords.latitude;
+                    currentLng = position.coords.longitude;
+
+                    // تحريك الخريطة فوراً لموقعك
+                    mainMap.setView([currentLat, currentLng], 15);
+
+                    // وضع نقطة زرقاء توضّح موقعك الحالي
+                    if (userLocationMarker) {
+                        userLocationMarker.setLatLng([currentLat, currentLng]);
+                    } else {
+                        userLocationMarker = L.circleMarker([currentLat, currentLng], {
+                            radius: 7,
+                            fillColor: '#38bdf8',
+                            color: '#ffffff',
+                            weight: 2,
+                            fillOpacity: 1
+                        }).addTo(mainMap).bindPopup('موقعي الحالي');
+                    }
+                },
+                (err) => {
+                    console.warn('تعذر تحديد الموقع تلقائياً:', err.message);
+                },
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        }
+
+        // استدعاء الدالة فور فتح الصفحة
+        centerOnUserLocation();
         const markers = {};
         let pickerMap = null;
         let pickerMarker = null;
@@ -424,8 +461,8 @@
             document.getElementById('assign-name').value = t.name ?? '';
             document.getElementById('assign-neighborhood').value = t.neighborhood ?? '';
 
-            const lat = t.latitude ?? DEFAULT_LAT;
-            const lng = t.longitude ?? DEFAULT_LNG;
+            const lat = t.latitude ?? currentLat;
+            const lng = t.longitude ?? currentLng;
             document.getElementById('assign-lat').value = lat;
             document.getElementById('assign-lng').value = lng;
 
